@@ -33,6 +33,7 @@ mod store;
 mod settings_ui;
 mod structure;
 mod thread_sleep;
+mod time_zone;
 mod ui;
 mod unit_options;
 mod update;

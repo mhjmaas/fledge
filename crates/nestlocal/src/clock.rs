@@ -4,7 +4,8 @@
 //! the clock when it is off, from an NTP server (SNTP, RFC 4330) or, on a
 //! network with no way out to one, from Home Assistant over MQTT
 //! (Bridge::ask_time). On a unit whose ntpd keeps the time, the clock is never
-//! off by enough to touch.
+//! off by enough to touch. The clock is UTC; the zone the unit shows it in
+//! is time_zone.rs's.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

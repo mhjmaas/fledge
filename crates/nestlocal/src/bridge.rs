@@ -38,6 +38,10 @@
 //!                                      Home Assistant's ask: {"heat": true,
 //!                                      "lease": 600, "rooms": [...]}, or
 //!                                      ON/OFF (demand.rs)
+//!   <prefix>/<serial>/set/time_zone   an IANA zone name (Europe/Amsterdam,
+//!                                      retained): the zone the unit shows
+//!                                      the time in; a change reboots the
+//!                                      unit into it (time_zone.rs)
 //!   <prefix>/<serial>/set/raw/<bucket> merge a JSON object into a bucket
 //!                                      (anything the entities don't cover)
 

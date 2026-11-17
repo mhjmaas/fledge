@@ -202,6 +202,10 @@ impl Bridge {
             }
             return;
         }
+        if name == "time_zone" {
+            self.set_time_zone(String::from_utf8_lossy(payload).trim());
+            return;
+        }
         if name == "screen_wake" {
             self.ui.wake();
             return;
@@ -450,6 +454,25 @@ impl Bridge {
         logf!("mqtt: wwn_boiler_option: {}", if on { "on" } else { "off" });
         self.publish_state();
         crate::unit_options::reboot_soon("the Works With Nest boiler option");
+    }
+
+    /// set/time_zone <IANA name>: the zone nlclient shows the time in
+    /// (time_zone.rs), Home Assistant's own. Empty, as a cleared retained
+    /// message arrives, leaves the zone as it is.
+    fn set_time_zone(&self, name: &str) {
+        use crate::time_zone::{install, Installed, LOCALTIME, MARKER, ZONEINFO};
+        if name.is_empty() {
+            return;
+        }
+        match install(std::path::Path::new(ZONEINFO), std::path::Path::new(LOCALTIME), std::path::Path::new(MARKER), name) {
+            Ok(Installed::Already) => {}
+            Ok(Installed::Restored) => logf!("mqtt: time_zone: {name} put back; nlclient takes it at its next start"),
+            Ok(Installed::Changed) => {
+                logf!("mqtt: time_zone: {name}");
+                crate::unit_options::reboot_soon("the time zone");
+            }
+            Err(e) => logf!("mqtt: time_zone: {e}"),
+        }
     }
 
     /// set/external_temperature_option ON/OFF: the unit's start options
