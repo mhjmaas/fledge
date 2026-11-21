@@ -41,6 +41,7 @@ fn heats(name: &str, arg: &str) -> bool {
         "fan_mode" => arg != "auto",
         "hot_water_boost" => !arg.eq_ignore_ascii_case("off"),
         "hot_water_schedule" => on_off(arg).unwrap_or(true),
+        "call_for_hot_water" => crate::hotwater::Ask::parse(arg).map_or(true, |a| a.on),
         "preset" | "target" | "target_low" | "target_high" => true,
         _ => false,
     }
@@ -554,6 +555,19 @@ impl Bridge {
                 device(fields!{"hot_water_boost_time_to_end" => num(end as f64)})
             }
 
+            "call_for_hot_water" => {
+                let ask = crate::hotwater::Ask::parse(arg)?;
+                let dev = self.store.get(&format!("device.{}", self.serial)).map(|d| d.value).unwrap_or_default();
+                if !crate::json::truthy(dev.get("has_hot_water_control")) {
+                    return Err("this Nest has no hot water control".into());
+                }
+                let end = crate::json::number(dev.get("hot_water_boost_time_to_end")).map_or(0, |e| e as i64);
+                match ask.boost_end(end, now) {
+                    Some(end) => device(fields!{"hot_water_boost_time_to_end" => num(end as f64)}),
+                    None => Ok(None),
+                }
+            }
+
             "hot_water_schedule" => {
                 device(fields!{"hot_water_mode" => if on_off(arg)? { "schedule" } else { "off" }})
             }
@@ -914,6 +928,25 @@ mod tests {
         assert_eq!(field("hot_water_schedule", "ON", "hot_water_mode"), json!("schedule"));
         assert_eq!(field("hot_water_schedule", "OFF", "hot_water_mode"), json!("off"));
         assert!(b.fields("hot_water_schedule", "maybe").is_err());
+    }
+
+    #[test]
+    fn call_for_hot_water_keeps_the_boost_running_through_the_command_topic() {
+        let b = test_bridge();
+        let end = || b.store.get("device.S").unwrap().value["hot_water_boost_time_to_end"].as_f64().unwrap_or(0.0);
+        let now = chrono::Utc::now().timestamp() as f64;
+        b.store.merge("device.S", &fields!{"has_hot_water_control" => false}, 0, 0, true);
+        assert!(b.apply("mqtt", "call_for_hot_water", "ON").is_err(), "no hot water control");
+        b.store.merge("device.S", &fields!{"has_hot_water_control" => true, "hot_water_boost_time_to_end" => 0}, 0, 0, true);
+        b.command("nestlocal/S/set/call_for_hot_water", br#"{"on": true, "lease": 600}"#);
+        let first = end();
+        assert!((now + 598.0..=now + 602.0).contains(&first), "{first}");
+        b.command("nestlocal/S/set/call_for_hot_water", b"ON");
+        assert_eq!(end(), first, "asked again a moment later: no write");
+        b.command("nestlocal/S/set/call_for_hot_water", b"OFF");
+        assert_eq!(end(), 0.0, "off ends it");
+        assert!(b.apply("mqtt", "call_for_hot_water", "maybe").is_err());
+        assert!(super::heats("call_for_hot_water", "ON") && !super::heats("call_for_hot_water", "OFF"));
     }
 
     #[test]

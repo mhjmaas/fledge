@@ -86,6 +86,108 @@ pub const CLIMATE_STEP: i32 = 90;
 /// the hand between, as the Nest's ring does. It clicks once a step.
 pub const CLIMATE_CLICK: i32 = CLIMATE_STEP / 2;
 
+/// Whether `card` shows the device `id`: a light (or group member), a
+/// player, a climate or a blind.
+fn holds(card: &Card, id: &str) -> bool {
+    match card {
+        Card::Lights(c) => c.lights.iter().chain(c.members.iter()).any(|l| l.id == id),
+        Card::Media(c) => c.id == id,
+        Card::Climate(c) => c.id == id,
+        Card::Cover(c) => c.id == id,
+        _ => false,
+    }
+}
+
+/// What of a device a command sets, to follow Home Assistant's reports of it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Aspect {
+    /// A light's level: 0 off, else its brightness.
+    Level,
+    Kelvin,
+    Hue,
+    Volume,
+    Target,
+    Position,
+}
+
+impl Aspect {
+    /// The device a command sets, what of it, and to what (None: on, at
+    /// whatever brightness).
+    fn of(command: &Command) -> Option<(&str, Aspect, Option<f64>)> {
+        Some(match command {
+            Command::Brightness(id, v) => (id, Aspect::Level, Some(f64::from(*v))),
+            Command::Off(id) => (id, Aspect::Level, Some(0.0)),
+            Command::On(id) => (id, Aspect::Level, None),
+            Command::Kelvin(id, v) => (id, Aspect::Kelvin, Some(f64::from(*v))),
+            Command::Hue(id, v) => (id, Aspect::Hue, Some(f64::from(*v))),
+            Command::Volume(id, v) => (id, Aspect::Volume, Some(f64::from(*v))),
+            Command::Temperature(id, v) => (id, Aspect::Target, Some(*v)),
+            Command::Position(id, v) => (id, Aspect::Position, Some(f64::from(*v))),
+            _ => return None,
+        })
+    }
+
+    /// How far a report may stray from a value and still be it (a percent
+    /// rounded through 255 on the way).
+    fn slack(self) -> f64 {
+        match self {
+            Aspect::Target => 0.05,
+            Aspect::Kelvin => 50.0,
+            _ => 1.0,
+        }
+    }
+
+    /// What `cards` say of it.
+    fn read(self, cards: &Cards, id: &str) -> Option<f64> {
+        cards.cards.iter().find_map(|card| match (self, card) {
+            (Aspect::Level | Aspect::Kelvin | Aspect::Hue, Card::Lights(c)) => {
+                let l = c.lights.iter().chain(c.members.iter()).find(|l| l.id == id)?;
+                match self {
+                    Aspect::Level => if l.on { l.brightness.map(f64::from) } else { Some(0.0) },
+                    Aspect::Kelvin => l.kelvin.map(f64::from),
+                    _ => l.hue.map(f64::from),
+                }
+            }
+            (Aspect::Volume, Card::Media(c)) if c.id == id => c.volume.map(f64::from),
+            (Aspect::Target, Card::Climate(c)) if c.id == id => c.target,
+            (Aspect::Position, Card::Cover(c)) if c.id == id => c.position.map(f64::from),
+            _ => None,
+        })
+    }
+}
+
+/// What the Nest has lately sent a device: what Home Assistant said of it
+/// before, and each value since. A report on that way between is Home
+/// Assistant catching up; one off it is a change made elsewhere.
+#[derive(Debug, Clone)]
+struct Trail {
+    id: String,
+    aspect: Aspect,
+    before: Option<f64>,
+    sent: Vec<f64>,
+    /// Sent on, at whatever brightness.
+    on: bool,
+    /// Home Assistant has reported a value sent: what it said before no
+    /// longer comes back by itself.
+    caught: bool,
+    at: Instant,
+}
+
+impl Trail {
+    /// Whether Home Assistant saying `is` is its catching up.
+    fn explains(&mut self, is: Option<f64>) -> bool {
+        let Some(is) = is else { return true };
+        let slack = self.aspect.slack();
+        if self.sent.iter().any(|v| (v - is).abs() <= slack) || (self.on && is > 0.0) {
+            self.caught = true;
+            return true;
+        }
+        let way = self.sent.iter().copied().chain(self.before.filter(|_| !self.caught));
+        let (low, high) = way.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        low - slack <= is && is <= high + slack
+    }
+}
+
 /// `t` to the nearest `step` (a thermostat's half degree).
 pub fn on_step(t: f64, step: f64) -> f64 {
     (t / step).round() * step
@@ -135,6 +237,10 @@ pub const LIGHTING: Duration = Duration::from_millis(1500);
 /// The thermostat's target goes to nlclient once the ring has rested this
 /// long, not at every step: each change is a bucket write it acts on.
 pub const SETTLE: Duration = Duration::from_millis(700);
+/// An open screen's number follows its device once the ring has rested
+/// this long: a change made elsewhere (a phone, an automation) shows, and
+/// one the hand just made has gone out and come back first.
+pub const FOLLOW_AFTER: Duration = Duration::from_secs(2);
 /// How long a media player's volume shows large after the ring turns.
 pub const VOLUME_SHOWN: Duration = Duration::from_millis(1500);
 /// How long the thermostat's dial says "Heat set to" after the ring turns.
@@ -513,6 +619,12 @@ pub struct Machine {
     alarm_drawn: Option<Instant>,
     /// Values sent to Home Assistant's devices, and when (EXPECT).
     expected: Vec<(Command, Instant)>,
+    /// The cards as Home Assistant last sent them, before what was sent
+    /// stood over them: its word again once those run out.
+    reported: Cards,
+    /// What was lately sent each device (EXPECT), to see a change made
+    /// elsewhere at once.
+    trails: Vec<Trail>,
 }
 
 impl Machine {
@@ -524,7 +636,7 @@ impl Machine {
             nest: None, nest_dial: false, set_at: None, menu_stepped: None, dial_offset: 0.0, volume_at: None, fledge: false,
             rests: false, near_at: None, kept_dark: false, floor: None, push: None, alarm_states: Default::default(), alarm_takeover: None,
             alarm_code: None, alarm_arming: None, alarm_wait: None, alarm_note: None, alarm_locked: None,
-            alarm_open: Vec::new(), alarm_drawn: None, expected: Vec::new(),
+            alarm_open: Vec::new(), alarm_drawn: None, expected: Vec::new(), reported: Cards::default(), trails: Vec::new(),
         }
     }
 
@@ -633,6 +745,21 @@ impl Machine {
 
     /// New cards from Home Assistant: keeps the mode if what it shows exists.
     pub fn set_cards(&mut self, cards: Cards, out: &mut Vec<Effect>) {
+        // A device reported off the way the Nest was taking it: changed
+        // elsewhere (a phone, straight after a turn). What was sent stops
+        // standing over it, and an open screen shows it now.
+        let mut elsewhere = false;
+        let mut trails = std::mem::take(&mut self.trails);
+        trails.retain_mut(|trail| {
+            if trail.explains(trail.aspect.read(&cards, &trail.id)) {
+                return true;
+            }
+            self.expected.retain(|(c, _)| Aspect::of(c).is_none_or(|(id, aspect, _)| id != trail.id || aspect != trail.aspect));
+            elsewhere = true;
+            false
+        });
+        self.trails = trails;
+        self.reported = cards.clone();
         self.cards = cards;
         // Its own ring's limits come with the cards.
         if let Some(nest) = self.nest.as_mut() {
@@ -677,6 +804,8 @@ impl Machine {
         };
         if !fine(shown, &self.cards) {
             self.go(Mode::Home, out);
+        } else if elsewhere {
+            self.follow();
         }
         self.dirty = true;
     }
@@ -2096,7 +2225,64 @@ impl Machine {
         }
     }
 
-    /// A climate's dial, on its target as it is now.
+    /// The open screen's number as its device has it now, while the ring
+    /// rests: what the screen was opened on, or the hand set, is not held
+    /// against a change made elsewhere. What the hand sent stands on the
+    /// card until Home Assistant catches up (apply_sent), so it doesn't
+    /// jump back; the count (D3) takes the number to where it is.
+    fn follow(&mut self) {
+        // Counts the hand left short of a step don't hold it: past
+        // TURN_KEPT the next turn drops them anyway.
+        if self.pending.is_some() {
+            return;
+        }
+        let next = match self.mode {
+            Mode::Dial { of, target } => {
+                let Some(card) = self.climate(of) else { return };
+                let Some(is) = card.target.map(|t| on_step(t, card.step)) else { return };
+                if is == on_step(target, card.step) {
+                    return;
+                }
+                // A part step the hand left on the mark goes with it.
+                self.dial_offset = 0.0;
+                Mode::Dial { of, target: is }
+            }
+            Mode::LightDim { slot, light, .. } => match self.card(slot) {
+                Some(Card::Lights(card)) if light < card.lights.len() => self.dimmer(slot, light),
+                _ => return,
+            },
+            Mode::LightWarmth { slot, light, value } => match self.card(slot) {
+                Some(Card::Lights(card)) => match card.lights.get(light).and_then(|l| l.kelvin) {
+                    Some(k) => Mode::LightWarmth { slot, light, value: k },
+                    None => Mode::LightWarmth { slot, light, value },
+                },
+                _ => return,
+            },
+            Mode::LightHue { slot, light, value } => match self.card(slot) {
+                Some(Card::Lights(card)) => match card.lights.get(light).and_then(|l| l.hue) {
+                    Some(h) => Mode::LightHue { slot, light, value: (h % 360).min(HUE_MAX) },
+                    None => Mode::LightHue { slot, light, value },
+                },
+                _ => return,
+            },
+            Mode::Volume { slot, value } => match self.card(slot) {
+                Some(Card::Media(card)) => Mode::Volume { slot, value: card.volume.unwrap_or(value) },
+                _ => return,
+            },
+            Mode::CoverSet { slot, value } => match self.card(slot) {
+                Some(Card::Cover(card)) => Mode::CoverSet { slot, value: card.position.unwrap_or(value) },
+                _ => return,
+            },
+            _ => return,
+        };
+        if next != self.mode {
+            self.turn = 0;
+            self.floor = None;
+            self.mode = next;
+            self.dirty = true;
+        }
+    }
+
     /// A light's dimmer, as it is now.
     fn dimmer(&self, slot: usize, light: usize) -> Mode {
         let (on, value) = match self.card(slot) {
@@ -2372,6 +2558,19 @@ impl Machine {
                                                 && c.payload()["id"] == id));
             }
             self.expected.push((command.clone(), now));
+            if let Some((id, aspect, value)) = Aspect::of(command) {
+                if !self.trails.iter().any(|t| t.id == id && t.aspect == aspect) {
+                    let before = aspect.read(&self.reported, id);
+                    self.trails.push(Trail { id: id.to_owned(), aspect, before, sent: Vec::new(), on: false, caught: false, at: now });
+                }
+                if let Some(trail) = self.trails.iter_mut().find(|t| t.id == id && t.aspect == aspect) {
+                    match value {
+                        Some(v) => trail.sent.push(v),
+                        None => trail.on = true,
+                    }
+                    trail.at = now;
+                }
+            }
             self.dirty = true;
         }
     }
@@ -2462,7 +2661,27 @@ impl Machine {
     /// whether nlclient shows its home dial (only asked for when it matters).
     pub fn tick(&mut self, now: Instant, lit: bool, home_dial: &mut dyn FnMut() -> bool, out: &mut Vec<Effect>) {
         self.alarm_tick(now, lit, out);
+        let ran_out: Vec<String> = self.expected.iter().filter(|(_, at)| now.duration_since(*at) >= EXPECT)
+            .filter_map(|(c, _)| c.payload()["id"].as_str().map(str::to_owned)).collect();
         self.expected.retain(|(_, at)| now.duration_since(*at) < EXPECT);
+        self.trails.retain(|t| now.duration_since(t.at) < EXPECT);
+        if !ran_out.is_empty() {
+            // What was sent no longer stands over Home Assistant's word: a
+            // change made elsewhere meanwhile (a phone, while the ring was
+            // turning) shows, and the open screen follows it. Only those
+            // devices' cards: a choice made on another just now stays.
+            for (index, card) in self.cards.cards.iter_mut().enumerate() {
+                if ran_out.iter().any(|id| holds(card, id)) {
+                    if let Some(reported) = self.reported.cards.get(index).filter(|r| ran_out.iter().any(|id| holds(r, id))) {
+                        *card = reported.clone();
+                    }
+                }
+            }
+            for (command, _) in self.expected.clone() {
+                self.apply_sent(&command);
+            }
+            self.dirty = true;
+        }
         if let Mode::Alert { id, .. } = &self.mode {
             let dark = !lit && !self.lighting.is_some_and(|until| now < until);
             if dark || self.alert_until.is_some_and(|until| now >= until) {
@@ -2491,6 +2710,9 @@ impl Machine {
             self.dirty = true;
         }
         let idle = now.duration_since(self.last_input);
+        if idle >= FOLLOW_AFTER && now.duration_since(self.last_sent) >= FOLLOW_AFTER {
+            self.follow();
+        }
         if !lit {
             // Out: the next light starts with the backlight on, as nlclient's own.
             self.kept_dark = false;
@@ -2601,6 +2823,25 @@ mod tests {
 
     fn cards() -> Cards {
         cards_waking(r#""chooser""#)
+    }
+
+    /// The cards with the lamp and the speaker as Home Assistant says.
+    fn reported(on: bool, brightness: u8, volume: u8) -> Cards {
+        Cards::parse(format!(r#"{{"cards":[
+            {{"kind":"lights","name":"Bedroom","icon":"","lights":[
+                {{"id":"light.lamp","name":"Lamp","on":{on},"dimmable":true,"brightness":{brightness}}},
+                {{"id":"switch.fan","name":"Fan","on":false,"dimmable":false}}]}},
+            {{"kind":"climate","id":"climate.kitchen","name":"Kitchen","target":19,"min":7,"max":30,"step":0.5}},
+            {{"kind":"media","id":"media_player.speaker","name":"Speaker","state":"playing","volume":{volume}}}],
+            "wake":"chooser"}}"#).as_bytes()).unwrap()
+    }
+
+    fn speaker(volume: u8) -> Cards {
+        reported(true, 60, volume)
+    }
+
+    fn lamp_at(on: bool, brightness: u8) -> Cards {
+        reported(on, brightness, 30)
     }
 
     /// A machine with cards, nlclient's dial lit and the ring held.
@@ -3996,6 +4237,116 @@ mod tests {
         assert_eq!(sent(&rig.press()), vec![("target".into(), "9".into())], "a press sends it, then its menu");
         rig.press();
         assert_eq!(rig.machine.mode, Mode::Chooser(0), "its menu's Back");
+    }
+
+    #[test]
+    fn an_open_dial_follows_a_target_set_elsewhere_once_the_ring_rests() {
+        let mut rig = nest_rig();
+        rig.press();
+        assert_eq!(rig.machine.mode, Mode::Dial { of: Dial::Nest, target: 20.0 });
+        // Set from a phone while the dial shows.
+        rig.machine.set_nest(nest(serde_json::json!({"target": 23.0})));
+        rig.wait(FOLLOW_AFTER);
+        assert_eq!(rig.machine.mode, Mode::Dial { of: Dial::Nest, target: 23.0 });
+        // The hand's own setting isn't taken back by the state before it.
+        rig.turn(-CLIMATE_STEP * 2);
+        assert_eq!(rig.machine.mode, Mode::Dial { of: Dial::Nest, target: 22.0 });
+        rig.wait(SETTLE);
+        rig.machine.set_nest(nest(serde_json::json!({"target": 23.0})));
+        rig.wait(FOLLOW_AFTER / 2);
+        assert_eq!(rig.machine.mode, Mode::Dial { of: Dial::Nest, target: 22.0 }, "too soon after the hand");
+        rig.machine.set_nest(nest(serde_json::json!({"target": 22.0})));
+        rig.wait(FOLLOW_AFTER * 2);
+        assert_eq!(rig.machine.mode, Mode::Dial { of: Dial::Nest, target: 22.0 });
+    }
+
+    #[test]
+    fn an_open_dimmer_follows_home_assistant_after_a_turn_short_of_a_step() {
+        let mut rig = Rig::woken();
+        let lamp = |on: bool, brightness: u8| Cards::parse(format!(r#"{{"cards":[
+            {{"kind":"lights","name":"Bedroom","icon":"","lights":[
+                {{"id":"light.lamp","name":"Lamp","on":{on},"dimmable":true,"brightness":{brightness}}},
+                {{"id":"switch.fan","name":"Fan","on":false,"dimmable":false}}]}}],
+            "wake":"chooser"}}"#).as_bytes()).unwrap();
+        rig.machine.set_cards(lamp(true, 100), &mut vec![]);
+        rig.machine.mode = Mode::LightDim { slot: 0, light: 0, on: true, value: 100 };
+        // The hand turns a little, not a whole step, and lets go.
+        rig.turn(-3);
+        rig.wait(FOLLOW_AFTER);
+        rig.machine.set_cards(lamp(true, 40), &mut vec![]);
+        rig.wait(FOLLOW_AFTER);
+        assert_eq!(rig.machine.mode, Mode::LightDim { slot: 0, light: 0, on: true, value: 40 }, "set elsewhere: 40%");
+        rig.machine.set_cards(lamp(false, 40), &mut vec![]);
+        rig.wait(FOLLOW_AFTER);
+        assert!(matches!(rig.machine.mode, Mode::LightDim { on: false, .. }), "and off");
+    }
+
+    #[test]
+    fn a_change_made_elsewhere_while_the_ring_turned_shows_at_once() {
+        let mut rig = Rig::woken();
+        rig.turn(CARD_STEP * 3);
+        rig.press();
+        assert_eq!(rig.machine.mode, Mode::Volume { slot: 2, value: 30 });
+        for _ in 0..10 {
+            rig.turn(VALUE_STEP);
+        }
+        let sent = Rig::sends(&rig.wait(SEND_EVERY));
+        assert_eq!(sent, vec![Command::Volume("media_player.speaker".into(), 40)]);
+        rig.machine.sent(&sent[0], rig.now);
+        // A phone sets 15 straight after; Home Assistant reports it.
+        let phone = speaker;
+        rig.machine.set_cards(phone(30), &mut vec![]);
+        assert_eq!(rig.machine.mode, Mode::Volume { slot: 2, value: 40 }, "Home Assistant not caught up yet: the hand's stands");
+        rig.machine.set_cards(phone(15), &mut vec![]);
+        assert_eq!(rig.machine.mode, Mode::Volume { slot: 2, value: 15 }, "off the way it was going: the phone's, at once");
+        rig.machine.set_cards(phone(15), &mut vec![]);
+        assert_eq!(rig.machine.mode, Mode::Volume { slot: 2, value: 15 });
+    }
+
+    #[test]
+    fn home_assistant_catching_up_on_a_turn_is_not_taken_for_a_change_elsewhere() {
+        let mut rig = Rig::woken();
+        rig.turn(CARD_STEP * 3);
+        rig.press();
+        for value in [35, 40, 45] {
+            rig.machine.sent(&Command::Volume("media_player.speaker".into(), value), rig.now);
+        }
+        for report in [30, 35, 40, 36] {
+            rig.machine.set_cards(speaker(report), &mut vec![]);
+            let volume = match &rig.machine.cards.cards[2] { Card::Media(m) => m.volume, _ => None };
+            assert_eq!(volume, Some(45), "{report} is on the way: the hand's 45 stands");
+        }
+        // A change elsewhere within the way can't be told: it shows once the sent value stops standing.
+        rig.wait(EXPECT + FOLLOW_AFTER);
+        assert_eq!(rig.machine.mode, Mode::Volume { slot: 2, value: 36 });
+        // A dimmer: turned down from 60, then switched off on a phone.
+        let mut rig = Rig::woken();
+        rig.machine.mode = Mode::LightDim { slot: 0, light: 0, on: true, value: 50 };
+        rig.machine.sent(&Command::Brightness("light.lamp".into(), 50), rig.now);
+        rig.machine.set_cards(lamp_at(true, 55), &mut vec![]);
+        assert_eq!(rig.machine.mode, Mode::LightDim { slot: 0, light: 0, on: true, value: 50 }, "55 is on the way");
+        rig.machine.set_cards(lamp_at(false, 50), &mut vec![]);
+        assert!(matches!(rig.machine.mode, Mode::LightDim { on: false, .. }), "off elsewhere shows at once");
+    }
+
+    #[test]
+    fn an_open_climate_dial_and_volume_follow_home_assistant() {
+        let mut rig = Rig::woken();
+        let changed = |target: f64, volume: u8| Cards::parse(format!(r#"{{"cards":[
+            {{"kind":"lights","name":"Bedroom","icon":"","lights":[
+                {{"id":"light.lamp","name":"Lamp","on":true,"dimmable":true,"brightness":60}},
+                {{"id":"switch.fan","name":"Fan","on":false,"dimmable":false}}]}},
+            {{"kind":"climate","id":"climate.kitchen","name":"Kitchen","target":{target},"min":7,"max":30,"step":0.5}},
+            {{"kind":"media","id":"media_player.speaker","name":"Speaker","state":"playing","volume":{volume}}}],
+            "wake":"chooser"}}"#).as_bytes()).unwrap();
+        rig.machine.mode = Mode::Dial { of: Dial::Card(1), target: 19.0 };
+        rig.machine.set_cards(changed(21.0, 30), &mut vec![]);
+        rig.wait(FOLLOW_AFTER);
+        assert_eq!(rig.machine.mode, Mode::Dial { of: Dial::Card(1), target: 21.0 });
+        rig.machine.mode = Mode::Volume { slot: 2, value: 30 };
+        rig.machine.set_cards(changed(21.0, 55), &mut vec![]);
+        rig.wait(FOLLOW_AFTER);
+        assert_eq!(rig.machine.mode, Mode::Volume { slot: 2, value: 55 });
     }
 
     #[test]

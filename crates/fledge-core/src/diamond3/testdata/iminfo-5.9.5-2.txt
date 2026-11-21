@@ -1,0 +1,165 @@
+iminfo 0x83000000
+
+## Checking Image at 83000000 ...
+   FIT image found
+   FIT description: Nest Flattened Image Tree
+    Image 0 (kernel@1)
+     Description:  Linux kernel
+     Type:         Kernel Image
+     Compression:  uncompressed
+     Data Start:   0x830000bc
+     Data Size:    3796288 Bytes = 3.6 MiB
+     Architecture: ARM
+     OS:           Linux
+     Load Address: 0x80008000
+     Entry Point:  0x80008000
+     Hash algo:    sha256
+     Hash value:   f3aee90393eec8ae6187a642caf2da7dafb8ea05f75e05925e31fcc0a5bf03d6
+    Image 1 (fdt@1)
+     Description:  diamond3-dvt (Display-3.7) DTB
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x8339ef00
+     Data Size:    40329 Bytes = 39.4 KiB
+     Architecture: ARM
+     Hash algo:    sha256
+     Hash value:   855a156b34bb6d8d5e4817518007f5c5925ee9c2c913594ab5977ba47d6d07b6
+    Image 2 (fdt@2)
+     Description:  diamond3-dvt (Display-3.6) DTB
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x833a8d5c
+     Data Size:    40329 Bytes = 39.4 KiB
+     Architecture: ARM
+     Hash algo:    sha256
+     Hash value:   855a156b34bb6d8d5e4817518007f5c5925ee9c2c913594ab5977ba47d6d07b6
+    Image 3 (fdt@3)
+     Description:  diamond3-dvt (Display-3.5) DTB
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x833b2bb8
+     Data Size:    40329 Bytes = 39.4 KiB
+     Architecture: ARM
+     Hash algo:    sha256
+     Hash value:   855a156b34bb6d8d5e4817518007f5c5925ee9c2c913594ab5977ba47d6d07b6
+    Image 4 (fdt@4)
+     Description:  diamond3-dvt (Display-3.4) DTB
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x833bca14
+     Data Size:    40329 Bytes = 39.4 KiB
+     Architecture: ARM
+     Hash algo:    sha256
+     Hash value:   855a156b34bb6d8d5e4817518007f5c5925ee9c2c913594ab5977ba47d6d07b6
+    Image 5 (fdt@5)
+     Description:  diamond3-evt2 (Display-3.3) DTB
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x833c6870
+     Data Size:    40329 Bytes = 39.4 KiB
+     Architecture: ARM
+     Hash algo:    sha256
+     Hash value:   6a0fcfdbdac9ed9464fa58e9e30147bcda4439c4784dd851b83eaf7ad58e5eeb
+    Image 6 (fdt@6)
+     Description:  diamond3-evt (Display-3.2) DTB
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x833d06cc
+     Data Size:    40329 Bytes = 39.4 KiB
+     Architecture: ARM
+     Hash algo:    sha256
+     Hash value:   e7af513c748955a8098aaa3f99b8094306ce3de444b4c07ae6639aa152e9245a
+    Image 7 (fdt@7)
+     Description:  diamond3-proto (Display-3.1) DTB
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x833da52c
+     Data Size:    40329 Bytes = 39.4 KiB
+     Architecture: ARM
+     Hash algo:    sha256
+     Hash value:   d5304dfad2e3d7c3793294b7ca6e8dc42dc5eda241e70a8432e7ef59059e1cf6
+    Image 8 (fdt@8)
+     Description:  diamond3-dev (Display-3.0) DTB
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x833e4388
+     Data Size:    37908 Bytes = 37 KiB
+     Architecture: ARM
+     Hash algo:    sha256
+     Hash value:   edb938e1ec9925a2c840c94ffc8925e044a1ba16f74eac763ea74e49984a3420
+    Default Configuration: 'Display-3.7@1'
+    Configuration 0 (Display-3.7@1)
+     Description:  Boot diamond3-dvt (Display-3.7)
+     Kernel:       kernel@1
+     FDT:          fdt@1
+     Hash algo:    sha256
+     Hash value:   unavailable
+     Sign algo:    sha256,rsa2048,imx:01
+     Sign value:   992befdc16399b65133e8977b9b2709b33911547aacbdc5f1dcad6cf3f332e6164172ab9cc20bbfb14b5bc50e29f4b918f5d53a6824c701c35750be8c90097e81ce694e8ace60407513edb0281a35a6775ae04119add47e80f364602291bb2a7702f3ffdaad416b7fa5a9bba54f124696eba72362999077bfaaa8b165b123fa3bd8054a424d8ee65ce3a55c4e9d6035127c4bef447f6821eb2b47b01b15564c14f7fd7682a1287671c16a3c0a7b94fdefbc7639c1b581075f9aaf040756ed6217d3f4e930abe10d293b143fa46cedb3c5ed421610667211eea386f0b2f5b2f1143fe621407ffb167ae3a486782c7ec85100a027af5232781ea45378e3a8db0b1
+    Configuration 1 (Display-3.6@2)
+     Description:  Boot diamond3-dvt (Display-3.6)
+     Kernel:       kernel@1
+     FDT:          fdt@2
+     Hash algo:    sha256
+     Hash value:   unavailable
+     Sign algo:    sha256,rsa2048,imx:01
+     Sign value:   5f3f6df8aed0bd14f9cb79f944e5ed8a2aa50d5d44b0ae262656762994df7771a73860b2710847885746afa404fe00b3aaddeba61be910d5155e774cbcbfa4bdf5bffb3b2aec24e404b609ebf5a84b2a5a6005c52cacdf945bc5f358c560e88082db1a3edb3719872dd3e76dc148965780a9df2b34c22be9cf9ccbd972d986f08dfb7e16f4dfd8146646a30141c035de771e9ffcc54754944a995d39450615a071da133427eb0bdfb5f06261cf6451f3a50b22afbe99ae892334bee30610b12d444b5c4d4e68c806294b684b0003d328252e0f740de438afb706465f537bc2c7df1b8887deaa18634316599c4a1ed7e284309983734f6d0fabb6244d646b4a77
+    Configuration 2 (Display-3.5@3)
+     Description:  Boot diamond3-dvt (Display-3.5)
+     Kernel:       kernel@1
+     FDT:          fdt@3
+     Hash algo:    sha256
+     Hash value:   unavailable
+     Sign algo:    sha256,rsa2048,imx:01
+     Sign value:   526fa1dd87cefa8394368aa10a1cdd1e4c728f0d01fbb8f2eba1006f00603dc9dd16696bf075e0522ac3a5c2e1bc6aa733562cf15c5078ca74945499af600efd67b00034e873e37454d82c2ba344485890a26aa9628c2e118c2fa4b1c2f7cd3837185e5978f3f59d08502746c137f9271e2f3c3b0d47488c2231516345e0104dc915b3530aac2c6bee95dcc8890612b6ba815d8dd0ebfafde237d62f7f379ee777519cba3c31c8374fa96904697c8c2ac726f6c195de76b019083d34d489615a507d09c7ee64f19a0e7dcef019278ccc94087115c4e59e88498542549c81490120800c2b2665df30331cb1828a01ef6c7204e59e588bf71975e43c653e0c8818
+    Configuration 3 (Display-3.4@4)
+     Description:  Boot diamond3-dvt (Display-3.4)
+     Kernel:       kernel@1
+     FDT:          fdt@4
+     Hash algo:    sha256
+     Hash value:   unavailable
+     Sign algo:    sha256,rsa2048,imx:01
+     Sign value:   4c3c2a2dfcba46569ffcfbb0126445c7fa1cd845149451d5d54eea3ea8abdfe5513812920fd33e41d15fc018e9116db9fe00642e3811cd103934a1de36fca27df0724032ff68c3cba25c198ddb03944971af17fa4d0b37313aac1fef9beb4c42c7a41daefaf8b1550383d86ade81cc0fdccb33c7bf372cf53b9cc04e80d8466e3913aaf0701723fa6d334364296b6c7cc8d3b44ce7d188ca75ab823097455c5a5fdf1400f3ad7a9c1382c3f1edff1b52b7456e10acdcd650edcfbd20656cbc584e4d387cc00d99ac59ef660e0e400f924ce4af5b19e7fe2b9cc48d43c68639d1e5b7d92400668c592cb9f4e764213f764cf65b0f7134a9fa94d08a048918eec1
+    Configuration 4 (Display-3.3@5)
+     Description:  Boot diamond3-evt2 (Display-3.3)
+     Kernel:       kernel@1
+     FDT:          fdt@5
+     Hash algo:    sha256
+     Hash value:   unavailable
+     Sign algo:    sha256,rsa2048,imx:01
+     Sign value:   997c8efbb68f2d2f221b63212a0f3abece6bc0a83427c73afcae26d02064ed721358bdcb57752c460eae7c16adebe8c1a7cf5933cccb6cf6de76d09c7477fd44d1be3bc05fc36789712809b9db3b593b00cb6994cecf6c3361bcbbaaede10b4bf68ce2ffd6fa65c12d5511b0ad89983d332ddd74258b4115100674f1abf9130839272680aeeb416c4f70d1068074477e17e7b8818f1ebe50c8aca327ea9e639a13d09540773d26e616330848364d7d4701e27e6c963df98f326bb71b90ad2f6c10566020a8df179a0425458edaee05d1b3b3711510bd485ed21f6cf0c88248199fc431d53942af2c6b2b630280c73f95d36151bdca3cd5fafc9afd682453b74d
+    Configuration 5 (Display-3.2@6)
+     Description:  Boot diamond3-evt (Display-3.2)
+     Kernel:       kernel@1
+     FDT:          fdt@6
+     Hash algo:    sha256
+     Hash value:   unavailable
+     Sign algo:    sha256,rsa2048,imx:01
+     Sign value:   4283a4813c5e0e74aef95e75ff58c93a787b0221613b7ac3c980f07dc84796b2e1bba59f541fbcc5ea7bc220d1c4c397754b503639710d75519be55d092643bc9453da7c5c9a21c9506ddefd30308c22105ba52f4ef8fe1d83b5fa8533bd76d14c3878a77171176b7d4b3f5e5b096d2bba04a06a7894d746bd9ede0e8d4df14c02910ac98e95ab6931fb1edcd3d06c6f7ce00144a1dedd65e50f21af33253e76fc012ccd76e5a2183dda31b05a069a21dd686348b92b566a5db1c230c53404dcb2c41aff6ba2df58cf4682ffa078c9405bad1123267fef0db696190c747249f3a0d5cc2c7bd0d2ba822e52afaf6a0dec0b953706d10e7679ab914437440f7685
+    Configuration 6 (Display-3.1@7)
+     Description:  Boot diamond3-proto (Display-3.1)
+     Kernel:       kernel@1
+     FDT:          fdt@7
+     Hash algo:    sha256
+     Hash value:   unavailable
+     Sign algo:    sha256,rsa2048,imx:01
+     Sign value:   23b36fd1c844c5fe4c7ae45e0021927b95712d142b95452dba19cc0788808ab278a1322c28ef4e35ddf7e973cb66fb69f287dc6db29f50099177fc5014944b33556dafe3bcdb0ad4d428953b654b4f45a6f0428e10b016738980aa14caaac9e19ec588ef4617c905a940f15176acf8515d81e3e058fa5d89a8974d86a01a33fad76edc7fa972aec61597ac969013a89eb9444059d249d9812b337b1976bb476da9fdd99fb03774457cac8964eb8f684499400363c9871d477fafbb02b9315f134dd0487c8abdb5fff0bb6b1b9cbae670a221e515ab685351036e069e8a4b1730e45eb71eebb494663d0d4ec5d3799d6377f55f7f25dd69e2f1caaa67c466db4d
+    Configuration 7 (Display-3.0@8)
+     Description:  Boot diamond3-dev (Display-3.0)
+     Kernel:       kernel@1
+     FDT:          fdt@8
+     Hash algo:    sha256
+     Hash value:   unavailable
+     Sign algo:    sha256,rsa2048,imx:01
+     Sign value:   b43f95d337312ed09f496b9e2f89c9fc89ab0bad4c085bb6f19c47751dfa0440709675358e950bd7b9a35eec660aca3a4112bfb6e4fe67c630c954248dc4c6515977718ad8013024a580558c9c6898e7e14ee293a18d858f9227f22805a932fe26c5d003f9df4a4cd468a3141dbf3178b5d99d69e887eae9fd719e9f38e6272d1bcb359e6832feb001fcbb53e738c06b3b6854803191ea29e680d9c935aa021c1744a2ea481b17f64561dce0ae5a28c9b65f4bbd1ce8bf8e439e16840623abd8b7ea7b8f4deb42fa50920741e84788a9ac9d39ca1b71de7bf49a493d28fbe8b028429d514bfd2dcd1e287af0f28239dc1166b0cf5b2a905cec59d5d9f74ee86f
+## Checking hash(es) for FIT Image at 83000000 ...
+   Hash(es) for Image 0 (kernel@1): sha256+ 
+   Hash(es) for Image 1 (fdt@1): sha256+ 
+   Hash(es) for Image 2 (fdt@2): sha256+ 
+   Hash(es) for Image 3 (fdt@3): sha256+ 
+   Hash(es) for Image 4 (fdt@4): sha256+ 
+   Hash(es) for Image 5 (fdt@5): sha256+ 
+   Hash(es) for Image 6 (fdt@6): sha256+ 
+   Hash(es) for Image 7 (fdt@7): sha256+ 
+   Hash(es) for Image 8 (fdt@8): sha256+ 
+=>

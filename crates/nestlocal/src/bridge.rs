@@ -38,6 +38,10 @@
 //!                                      Home Assistant's ask: {"heat": true,
 //!                                      "lease": 600, "rooms": [...]}, or
 //!                                      ON/OFF (demand.rs)
+//!   <prefix>/<serial>/set/call_for_hot_water
+//!                                      ON, OFF or {"on": true, "lease": 600}:
+//!                                      the boost runs on while asked
+//!                                      (hotwater.rs)
 //!   <prefix>/<serial>/set/raw/<bucket> merge a JSON object into a bucket
 //!                                      (anything the entities don't cover)
 
@@ -1242,6 +1246,14 @@ pub fn state(dev: &Fields, sh: &Fields) -> Fields {
     }
     s.insert("hot_water_boost".into(), hot_water_boost(dev).map_or("off".to_string(), |m| m.to_string()).into());
     s.insert("hot_water_schedule".into(), hot_water_schedule(dev).into());
+    // Whether it has hot water, and when the boost ends: the integration's
+    // Call for hot water switch is there only with both (hotwater.rs).
+    let hot_water = truthy(dev.get("has_hot_water_control"));
+    s.insert("has_hot_water_control".into(), hot_water.into());
+    if hot_water {
+        s.insert("hot_water_boost_end".into(), number(dev.get("hot_water_boost_time_to_end"))
+            .filter(|end| *end > now).map_or(Value::Null, rfc3339));
+    }
 
     let eco_mode = sprint(dev.get("eco").and_then(|e| e.get("mode")));
     let preset = if eco_mode == "manual-eco" || eco_mode == "auto-eco" { "eco" } else { "none" };
@@ -1588,6 +1600,15 @@ pub mod tests {
         assert!(switch_on(&obj(json!({"hot_water_boost_time_to_end": now + 60})), "hot_water_boost"));
         assert!(!switch_on(&obj(json!({"hot_water_mode": "off"})), "hot_water_schedule"));
         assert!(switch_on(&obj(json!({"learning_mode": true})), "learning_mode"));
+
+        // Call for hot water's switch: there only with hot water, and the boost's end.
+        let none = state(&Fields::new(), &Fields::new());
+        assert_eq!(none["has_hot_water_control"], json!(false));
+        assert!(!none.contains_key("hot_water_boost_end"), "no hot water: no switch");
+        let idle = state(&obj(json!({"has_hot_water_control": true})), &Fields::new());
+        assert_eq!((&idle["has_hot_water_control"], &idle["hot_water_boost_end"]), (&json!(true), &Value::Null));
+        let boosting = state(&obj(json!({"has_hot_water_control": true, "hot_water_boost_time_to_end": now + 600})), &Fields::new());
+        assert!(boosting["hot_water_boost_end"].as_str().is_some_and(|t| t.ends_with('Z')));
     }
 
     #[test]

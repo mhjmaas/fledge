@@ -152,6 +152,65 @@ pub fn write(bucket: &Fields, arg: &str, now: i64) -> Result<Fields, String> {
     Ok(fields!{"intervals" => Value::Array(intervals)})
 }
 
+/// Call for hot water: Home Assistant keeps the hot water on for as long
+/// as it wants, through the Nest's own boost.
+///
+///   set/call_for_hot_water  ON, OFF or {"on": true, "lease": 600}
+///
+/// ON moves the boost's end to `lease` seconds from now; the Fledge
+/// integration sends it again every minute while its switch is on, and it
+/// is written only once less than half the lease is left, so the boost
+/// runs on with no gap and no bucket write a minute. If the asks stop
+/// (Home Assistant, the broker or the network gone) the boost simply runs
+/// out: the Nest's own timer is the safety net, and its schedule carries
+/// on as before. A longer boost already running is left as it is. OFF
+/// ends the boost, whoever started it: the integration sends it once, as
+/// its switch is turned off.
+#[derive(Debug, PartialEq)]
+pub struct Ask {
+    pub on: bool,
+    pub lease: i64,
+}
+
+/// A lease, seconds: the default and the range an ask may name.
+pub const LEASE: i64 = 600;
+const LEASE_RANGE: (i64, i64) = (120, 3600);
+
+impl Ask {
+    pub fn parse(arg: &str) -> Result<Ask, String> {
+        let arg = arg.trim();
+        match arg.to_ascii_uppercase().as_str() {
+            "ON" | "1" | "TRUE" => return Ok(Ask { on: true, lease: LEASE }),
+            "OFF" | "0" | "FALSE" => return Ok(Ask { on: false, lease: LEASE }),
+            _ => {}
+        }
+        let bad = |e: &str| Err(format!("expected ON, OFF or {{\"on\": true, \"lease\": 600}}: {e}"));
+        let Ok(Value::Object(o)) = serde_json::from_str::<Value>(arg) else {
+            return bad("not ON, OFF or a JSON object");
+        };
+        let Some(on) = o.get("on").and_then(Value::as_bool) else {
+            return bad("on must be true or false");
+        };
+        let lease = match o.get("lease") {
+            None | Some(Value::Null) => LEASE,
+            Some(v) => match crate::json::number(Some(v)) {
+                Some(s) if (LEASE_RANGE.0 as f64..=LEASE_RANGE.1 as f64).contains(&s) => s as i64,
+                _ => return bad(&format!("lease must be {}-{} seconds", LEASE_RANGE.0, LEASE_RANGE.1)),
+            },
+        };
+        Ok(Ask { on, lease })
+    }
+
+    /// The boost end (seconds since 1970, 0 for none) to write at `now`,
+    /// with the boost now ending at `end`; None when what's there will do.
+    pub fn boost_end(&self, end: i64, now: i64) -> Option<i64> {
+        if !self.on {
+            return (end > now).then_some(0);
+        }
+        (end < now + self.lease / 2).then_some(now + self.lease)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +257,29 @@ mod tests {
             r#"{"mon": [{"on": "06:00", "off": "09:00"}, {"on": "08:00", "off": "10:00"}]}"#] {
             assert!(write(&bucket(), bad, 0).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_call_for_hot_water_parses_on_off_and_a_lease() {
+        assert_eq!(Ask::parse(" on "), Ok(Ask { on: true, lease: LEASE }));
+        assert_eq!(Ask::parse("OFF"), Ok(Ask { on: false, lease: LEASE }));
+        assert_eq!(Ask::parse(r#"{"on": true, "lease": 900}"#), Ok(Ask { on: true, lease: 900 }));
+        for bad in ["maybe", r#"{"lease": 600}"#, r#"{"on": true, "lease": 30}"#, r#"{"on": true, "lease": 99999}"#] {
+            assert!(Ask::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_call_for_hot_water_keeps_the_boost_running_without_a_write_a_minute() {
+        let on = Ask { on: true, lease: 600 };
+        let now = 1_000_000;
+        assert_eq!(on.boost_end(0, now), Some(now + 600), "no boost: one to the lease's end");
+        assert_eq!(on.boost_end(now - 5, now), Some(now + 600), "one that ended");
+        assert_eq!(on.boost_end(now + 540, now), None, "asked a minute ago: left as it is");
+        assert_eq!(on.boost_end(now + 299, now), Some(now + 600), "under half the lease left: moved on");
+        assert_eq!(on.boost_end(now + 7200, now), None, "a longer boost from the Nest stands");
+        let off = Ask { on: false, lease: 600 };
+        assert_eq!(off.boost_end(now + 300, now), Some(0), "off ends the boost");
+        assert_eq!(off.boost_end(0, now), None, "none to end");
     }
 }

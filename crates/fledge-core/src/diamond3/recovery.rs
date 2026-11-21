@@ -102,11 +102,20 @@ pub fn newest(candidates: Vec<Environment>) -> Option<Environment> {
     })
 }
 
-/// The vendor FIT has one kernel and nine FDTs in 5.9.4-5, ten in 6.4-8.
-/// iminfo prints one "sha256+" for each valid hash and "Bad hash in FIT
-/// image!" on failure: at least the 5.9.4-5 count, and no bad one.
+/// `iminfo` of a FIT whose every image's hashes check. The vendor FIT has
+/// one kernel and a varying number of FDTs (nine in 5.9.4-5, eight in
+/// 5.9.5-2, ten in 6.4-8), so no fixed count: as many hash lines as the
+/// images it declares, each "sha256+", and no "Bad hash in FIT image!".
 pub fn verified_fit(output: &str) -> bool {
-    output.contains("FIT image found") && !output.contains("Bad hash") && output.matches("sha256+").count() >= 10
+    static DECLARED: LazyLock<Regex> = LazyLock::new(|| regex(r"(?m)^\s+Image \d+ \("));
+    static HASHED: LazyLock<Regex> = LazyLock::new(|| regex(r"(?m)^\s*Hash\(es\) for Image \d+ \([^)]*\):(.*)$"));
+    if !output.contains("FIT image found") || output.contains("Bad hash") {
+        return false;
+    }
+    let declared = DECLARED.find_iter(output).count();
+    let hashed: Vec<&str> = HASHED.captures_iter(output).map(|c| c.get(1).map_or("", |m| m.as_str()).trim()).collect();
+    declared >= 2 && hashed.len() == declared
+        && hashed.iter().all(|h| h.contains("sha256+") && !h.contains('-') && !h.contains("error"))
 }
 
 /// The firmware version a mounted rootfs declares: the kernel release its
@@ -643,7 +652,7 @@ pub(crate) mod tests {
                 }
                 ["ubifsls", _] => "<DIR>\t        32  Wed Nov  5 07:22:11 2025  4.1.15-6.4-8\n".into(),
                 ["printenv", "filesize"] => "filesize=384\n".into(),
-                ["iminfo", _] => format!("FIT image found\n{}", "Hash(es) for Image: sha256+\n".repeat(10)),
+                ["iminfo", _] => include_str!("testdata/iminfo-5.9.5-2.txt").to_string(),
                 ["bdinfo"] => format!("DRAM bank   = 0x00000000\n-> start    = 0x80000000\n-> size     = {:#010x}\n", self.dram),
                 ["nandbcb", "dump", _] => {
                     let offset = *self.nand.keys().next().unwrap();
@@ -797,9 +806,27 @@ pub(crate) mod tests {
 
     #[test]
     fn fit_needs_every_hash() {
-        assert!(verified_fit(&format!("FIT image found\n{}", "sha256+\n".repeat(10))));
-        assert!(!verified_fit(&format!("FIT image found\n{}", "sha256+\n".repeat(9))));
-        assert!(!verified_fit(&format!("FIT image found\n{}Bad hash in FIT image!", "sha256+\n".repeat(10))));
+        let fit = |images: usize, failing: Option<usize>| {
+            let mut out = String::from("## Checking Image at 83000000 ...\n   FIT image found\n");
+            for i in 0..images {
+                out += &format!("    Image {i} (fdt@{i})\n     Hash algo:    sha256\n");
+            }
+            out += "## Checking hash(es) for FIT Image at 83000000 ...\n";
+            for i in 0..images {
+                let mark = if failing == Some(i) { "sha256-" } else { "sha256+" };
+                out += &format!("   Hash(es) for Image {i} (fdt@{i}): {mark} \n");
+            }
+            out
+        };
+        assert!(verified_fit(&fit(10, None)), "6.x: a kernel and nine device trees");
+        assert!(verified_fit(&fit(9, None)), "5.9.5-2: a kernel and eight");
+        assert!(!verified_fit(&fit(9, Some(4))), "one failing");
+        assert!(!verified_fit(&fit(1, None)), "a kernel alone is no Nest FIT");
+        let short = fit(9, None).replace("   Hash(es) for Image 8 (fdt@8): sha256+ \n", "");
+        assert!(!verified_fit(&short), "an image left unchecked");
+        assert!(!verified_fit(&format!("{}Bad hash in FIT image!", fit(9, None))));
+        // fledge#17: firmware 5.9.5-2's FIT, refused by the old count of ten.
+        assert!(verified_fit(include_str!("testdata/iminfo-5.9.5-2.txt")));
     }
 
     fn ubifs(lebs: u32, leb_size: u32) -> Vec<u8> {

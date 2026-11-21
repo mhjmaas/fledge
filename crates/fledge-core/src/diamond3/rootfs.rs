@@ -99,8 +99,13 @@ fn patch_usb_shell(tree: &mut Tree, usb_shell: bool) -> Result<()> {
     Ok(())
 }
 
-/// sshd_config's root login with SSH on and root's password refused: keys only.
-const KEY_ONLY_LOGIN: &str = "PermitRootLogin prohibit-password\n";
+/// sshd_config's root login with SSH on and root's password refused: keys
+/// only. The Nest's OpenSSH (6.0) predates "prohibit-password" (7.0) and
+/// won't start with it (fledge#16); "without-password" means the same and
+/// every version takes it.
+const KEY_ONLY_LOGIN: &str = "PermitRootLogin without-password\n";
+/// What v0.11.0 wrote for it, which stopped sshd: put back like the rest.
+const KEY_ONLY_LOGIN_V011: &str = "PermitRootLogin prohibit-password\n";
 
 /// An SSH server at boot, root logins with a key and, with `password_login`,
 /// root's password, and an ECDSA host key current clients accept. Without
@@ -122,7 +127,7 @@ pub fn patch_ssh(tree: &mut Tree, enabled: bool, password_login: bool) -> Result
     for (i, (name, mode, stock, ssh)) in SSH_EDITS.into_iter().enumerate() {
         let mut content = text(tree, name)?;
         // The root login line has two SSH forms: with the password, or keys only.
-        let forms: &[&str] = if i == 0 { &[ssh, KEY_ONLY_LOGIN] } else { &[ssh] };
+        let forms: &[&str] = if i == 0 { &[ssh, KEY_ONLY_LOGIN, KEY_ONLY_LOGIN_V011] } else { &[ssh] };
         for form in forms {
             if content.matches(form).count() == 1 {
                 content = content.replace(form, stock);

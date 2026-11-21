@@ -120,8 +120,16 @@ const NLSLEEPD_START: (&str, &str) = (
     "\n ${STARTDAEMON} -q -b -m -p \"${NLSLEEPD_PID_FILE}\" -a ${NLSLEEPD_APP} ",
     "\n LD_PRELOAD=/nestlabs/lib/libwakefilter.so ${STARTDAEMON} -q -b -m -p \"${NLSLEEPD_PID_FILE}\" -a ${NLSLEEPD_APP} ");
 
-/// nlsleepd started with the wake pattern library for a unit with Matter, so
-/// that a controller looking the sleeping unit up wakes it; as stock without.
+/// Whether the unit gets the wake pattern library: with Matter, so that a
+/// controller looking the sleeping unit up wakes it, and on a gen 2 with MQTT,
+/// whose nlsleepd sets a pattern that keeps the broker's data from waking it
+/// (platform/common/wakefilter leaves that pattern out).
+fn wake_filter_installed(target: Device, options: &Options) -> bool {
+    !options.wake_filter.is_empty() && (options.matter.is_some() || (target == Device::J49 && options.mqtt.is_some()))
+}
+
+/// nlsleepd started with the wake pattern library when the unit gets it; as
+/// stock without.
 fn patch_wake_patterns(tree: &mut Tree, enabled: bool) -> Result<()> {
     let (stock, preloaded) = NLSLEEPD_START;
     let mut script = text(tree, NLSLEEP)?.replace(preloaded, stock);
@@ -469,8 +477,9 @@ pub struct Options {
     pub overlay: Option<Overlay>,
     pub mqtt: Option<Mqtt>,
     pub matter: Option<Matter>,
-    /// The library nlsleepd preloads for Matter (platform/common/wakefilter):
-    /// installed with Matter on a gen 2 or gen 3, removed without.
+    /// The library nlsleepd preloads (platform/common/wakefilter): installed
+    /// with Matter on a gen 2 or gen 3 and with MQTT on a gen 2, removed
+    /// without.
     pub wake_filter: Vec<u8>,
     /// Files for the optional onboard Thread transport.
     pub thread: Option<Overlay>,
@@ -678,7 +687,7 @@ pub fn patch_on_device(volume: &mut impl Volume, target: Device, options: &Optio
     if matches!(target, Device::Diamond3 | Device::J49) {
         fetch(volume, &mut tree, &mut originals, &[NLSLEEP], false, true)?;
         fetch(volume, &mut tree, &mut originals, &[WAKE_FILTER], false, false)?;
-        let wake = options.matter.is_some() && !options.wake_filter.is_empty();
+        let wake = wake_filter_installed(target, options);
         if wake {
             tree.insert(WAKE_FILTER.into(), (options.wake_filter.clone(), 0o755));
         }
@@ -1209,6 +1218,21 @@ mod tests {
     }
 
     #[test]
+    fn a_gen_2_with_mqtt_gets_the_wake_pattern_library_and_a_gen_3_only_with_matter() {
+        let mqtt = Some(Mqtt { url: "tcp://b:1883".into(), ..Mqtt::default() });
+        let matter = Some(Matter::from_pairing_code(nestlocal::DEFAULT_MATTER_CODE).unwrap());
+        let library = b"\x7fELF library".to_vec();
+        let with_mqtt = Options { mqtt, wake_filter: library.clone(), ..options() };
+        assert!(wake_filter_installed(Device::J49, &with_mqtt));
+        assert!(!wake_filter_installed(Device::Diamond3, &with_mqtt));
+        let with_matter = Options { matter, wake_filter: library.clone(), ..options() };
+        assert!(wake_filter_installed(Device::J49, &with_matter));
+        assert!(wake_filter_installed(Device::Diamond3, &with_matter));
+        assert!(!wake_filter_installed(Device::J49, &Options { wake_filter: library, ..options() }));
+        assert!(!wake_filter_installed(Device::J49, &Options { wake_filter: Vec::new(), ..with_mqtt }));
+    }
+
+    #[test]
     fn a_script_that_starts_nlsleepd_another_way_is_refused_for_matter_and_left_alone_without() {
         let mut tree = Tree::new();
         tree.insert(NLSLEEP.into(), (b"start_nlsleepd () {\n nlsleepd &\n}\n".to_vec(), 0o755));
@@ -1410,7 +1434,7 @@ mod tests {
             ("etc/inittab", |f| f.2 = b"::sysinit:/etc/init.d/rcS\n".to_vec(), "USB getty"),
             ("etc/shadow", |f| f.1 = 0o644, "mode 640"),
             ("etc/init.d/rcS", |f| f.2.extend_from_slice(b"${MOUNT} -n -o remount,rw /\n"), "somewhere other than"),
-            ("etc/ssh/sshd_config", |f| f.2 = b"PermitRootLogin without-password\n".to_vec(), "PermitRootLogin no"),
+            ("etc/ssh/sshd_config", |f| f.2 = b"PermitRootLogin forced-commands-only\n".to_vec(), "PermitRootLogin no"),
             ("etc/hosts", |f| f.2.extend_from_slice(HOSTS_BEGIN.as_bytes()), "without its end line"),
         ];
         for (name, change, error) in cases {
@@ -1705,7 +1729,14 @@ mod tests {
         let key = Some(public_key("ssh-ed25519", &[&[1; 32]]));
         assert!(patch(&mut volume, &Options { ssh: true, ssh_key_only: true, ..options() }, false).is_err(), "no key: no way in");
         patch(&mut volume, &Options { ssh: true, ssh_key_only: true, ssh_public_key: key.clone(), ..options() }, false).unwrap();
-        assert!(volume.text("etc/ssh/sshd_config").contains("PermitRootLogin prohibit-password\n"));
+        // OpenSSH 6.0 on the Nest: "prohibit-password" stops sshd (fledge#16).
+        assert!(volume.text("etc/ssh/sshd_config").contains("PermitRootLogin without-password\n"));
+        // A unit v0.11.0 patched keys only: its line is put right.
+        let config = volume.text("etc/ssh/sshd_config").replace("without-password", "prohibit-password");
+        volume.files.get_mut("etc/ssh/sshd_config").unwrap().2 = config.into_bytes();
+        patch(&mut volume, &Options { ssh: true, ssh_key_only: true, ssh_public_key: key.clone(), ..options() }, false).unwrap();
+        let config = volume.text("etc/ssh/sshd_config");
+        assert!(config.contains("PermitRootLogin without-password\n") && !config.contains("prohibit-password"), "{config}");
         patch(&mut volume, &Options { ssh: true, ssh_public_key: key, ..options() }, false).unwrap();
         assert!(volume.text("etc/ssh/sshd_config").contains("PermitRootLogin yes\n"), "password login allowed again");
         patch(&mut volume, &options(), false).unwrap();

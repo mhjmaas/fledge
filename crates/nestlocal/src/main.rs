@@ -32,6 +32,7 @@ mod schedule;
 mod sensor;
 mod store;
 mod settings_ui;
+mod sshd_fix;
 mod structure;
 mod thread_sleep;
 mod ui;
@@ -158,13 +159,22 @@ fn main() {
 
 /// nlclient's settings file, as it should be when nlclient starts.
 fn prepare_settings(config: &flags::Config) {
+    use std::path::Path;
+    match sshd_fix::repair(Path::new(sshd_fix::CONFIG), Path::new(sshd_fix::RCS)) {
+        Ok(false) => {}
+        Ok(true) => {
+            logf!("nestlocal: {}: keys-only root login written the way this OpenSSH reads it; starting sshd", sshd_fix::CONFIG);
+            let _ = std::process::Command::new("/etc/init.d/sshd").arg("start")
+                .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+        }
+        Err(e) => logf!("nestlocal: {}: {e}", sshd_fix::CONFIG),
+    }
     let path = &config.settings;
     match structure::seed_structure_id(path, &config.serial) {
         Ok(true) => logf!("nestlocal: seeded structure_id in {path}"),
         Ok(false) => {}
         Err(e) => fatal!("{e}"),
     }
-    use std::path::Path;
     match heatlink::prepare(Path::new(path), Path::new(heatlink::CHOICE), Path::new(heatlink::RCS), Path::new(heatlink::MARKER)) {
         Ok(heatlink::Prepared::Nothing) => {}
         Ok(heatlink::Prepared::Flashed) => logf!("nestlocal: flashed since Home Assistant chose {}: the flasher's choice stands", heatlink::KEY),

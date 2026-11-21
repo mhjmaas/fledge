@@ -39,5 +39,14 @@
 </ul>
 <p>Heating only, for now: cooling and heat pumps carry on as before.</p>
 
+<h2 id="call-for-hot-water">Home Assistant calls for hot water</h2>
+<p>A Nest with hot water control gets a <strong>Call for hot water</strong> switch from the Fledge integration. On, the hot water stays on for as long as the switch does. Off, it goes off. There are no 30, 60 or 120 minute steps, and no gap while a boost is renewed. It needs nothing else turned on, and it works with or without Call for heat.</p>
+<ul>
+<li>It works through the Nest's own hot water boost: the boost's end keeps moving forward while the switch is on, so the Nest's screen and the Hot water boost entity show it as a boost.</li>
+<li><strong>If Home Assistant stops</strong>, the boost runs out within ten minutes, and the hot water goes back to the Nest's own schedule.</li>
+<li>Your hot water schedule carries on as before. Turn off <strong>Hot water schedule</strong> if Home Assistant should be the only one turning it on.</li>
+<li>A longer boost started on the Nest is left to run. Turning the switch off ends any boost.</li>
+</ul>
+
 <h2 id="panel-only">As a panel only</h2>
 <p>Turn off the thermostat's <strong>Act as a thermostat</strong> switch in Home Assistant and it stops controlling heating: the screen shows only your cards. Turning it back on brings back its heating entities, which Home Assistant may re-create under new entity IDs; check any automations that use them.</p>
